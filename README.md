@@ -149,9 +149,11 @@ To add a word, an icon or a synonym, edit the tables at the top of [`index.ts`](
 
 ## Development
 
+Use the Node version in `.nvmrc` (`24.22.3`).
+
 ```sh
-bun install
-bun run check                # types and tests
+npm ci --ignore-scripts
+npm run check                # lockfile, types, and tests
 python3 demo/shots.py        # redraw the demo replies in a real Pi session, as HTML to screenshot
 ```
 
