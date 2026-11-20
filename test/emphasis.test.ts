@@ -56,7 +56,8 @@ describe("pill tone", () => {
 	const cases: readonly [string, PillTone][] = [
 		["Failed", "error"], ["Blocked", "error"], ["Needs you", "warning"], ["Decision", "warning"],
 		["Done", "success"], ["Observed", "success"], ["Costs money", "danger"], ["Irreversible", "danger"],
-		["Implement", "mode"], ["Shared", "owner"], ["Inferred", "neutral"], ["Anything else", "neutral"],
+		["Implement", "mode"], ["Verify", "mode"], ["Qualify", "mode"], ["Shared", "owner"],
+		["Inferred", "neutral"], ["Anything else", "neutral"],
 	];
 	for (const [word, tone] of cases) {
 		test(`${word} is ${tone}`, () => assert.equal(toneOf(word), tone));
@@ -72,6 +73,10 @@ describe("pill tone", () => {
 
 describe("pills", () => {
 	test("a known word gets its icon", () => assert.equal(plain("[[Done]]"), "|\uf00c Done|"));
+	test("Verify and legacy Qualify render with the mode icon", () => {
+		assert.equal(plain("[[Verify]]"), "|\uf0c3 Verify|");
+		assert.equal(plain("[[Qualify]]"), "|\uf0c3 Qualify|");
+	});
 	test("an unknown word has no icon", () => assert.equal(plain("[[Anything else]]"), "|Anything else|"));
 	test("synonyms display as one word and keep their detail", () => {
 		assert.equal(plain("[[Completed]]"), "|\uf00c Done|");
@@ -146,6 +151,22 @@ describe("reply guidance", () => {
 			assert.ok(text.includes(`**${word}:**`));
 			assert.notEqual(plain(`x **${word}:** y`), `x **<mdLink>${word}:</>** y`);
 		}
+	});
+	test("teaches Verify instead of legacy Qualify", () => {
+		assert.ok(text.includes("[[Verify]]"));
+		assert.doesNotMatch(text, /\[\[Qualify\]\]|\bQualify\b/i);
+	});
+	test("defers substance and plain-text rules to user/project instructions and exempts brief updates", () => {
+		assert.match(text, /visual presentation only/i);
+		assert.match(text, /user and project instructions govern substance/i);
+		assert.match(text, /exempt 1[–-]2 line working/i);
+		assert.match(text, /cyan[^\n]*optional/i);
+		assert.match(text, /blue[^\n]*optional/i);
+	});
+	test("stays compact to limit prompt overhead", () => {
+		const words = text.trim().split(/\s+/).length;
+		assert.ok(words < 550, `expected < 550 words, got ${words}`);
+		assert.ok(text.length < 3800, `expected < 3800 chars, got ${text.length}`);
 	});
 	test("addresses any user", () => assert.doesNotMatch(text, /\bJohn\b|~\/dev/));
 });

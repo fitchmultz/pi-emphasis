@@ -78,12 +78,12 @@ pi
 
 An agent writes pills only when it is told how. In Pi's terminal interface the extension adds a `reply_style` section to the system prompt on every run, so there is nothing to paste into an `AGENTS.md`. The section tells the agent:
 
-- which words to use for each color, and that every failure, ask and unchecked claim needs its pill
-- to open a reply with the kind of work it understood, and to mark consequences and ownership
-- to follow each attention pill with the action it calls for, such as the fastest check after `[[Unverified]]`
-- to write labels as plain words, because the extension adds the icons
+- that `<reply_style>` governs visual presentation only in this terminal, while user and project instructions govern substance, plain language, and when plain text is required
+- to keep brief 1–2 line working updates plain (exempt from bold lead labels, mode pills, and action lead-ins), reserving full structure for substantive replies
+- which words to use for each color, requiring pills on substantive findings, failures, asks, unchecked claims, and costly or risky actions while keeping mode (`[[Verify]]`, etc.) and ownership pills optional when helpful
+- to follow attention pills with a short bold action lead-in (`**Check:**`, `**Do:**`, `**Next:**`, etc.), and to write labels as plain words so the extension adds icons
 
-The word lists in that section are read from the same tables that color the pills, so the rules and the drawing cannot drift apart. It adds about 1,500 tokens to the prompt. Print, JSON and RPC runs do not get the section, since nothing there draws pills.
+The word lists in that section are read from the same tables that color the pills, so the rules and the drawing cannot drift apart. It adds about 700 tokens to the prompt. Print, JSON and RPC runs do not get the section, since nothing there draws pills.
 
 To keep the drawing and write your own rules, set `PI_EMPHASIS_GUIDANCE=0`.
 
@@ -99,7 +99,7 @@ Write `[[Word]]` beside the thing it describes. The word decides the color and t
 | Yellow | Look here | Needs you, Decision, Unverified, Partial, Skipped, In progress, Pending, At risk, Review, Todo, Stale, Draft |
 | Green | Settled | Done, Passed, Observed, Fixed, Live, Recommended, Keep, Ready, Merged, Safe, Verified, Shipped, Approved, Healthy |
 | Solid red | Consequences | Costs money, Destructive, Irreversible |
-| Cyan | Kind of work | Brainstorm, Investigate, Preview, Implement, Qualify |
+| Cyan | Kind of work | Brainstorm, Investigate, Preview, Implement, Verify (also accepts Qualify) |
 | Solid blue | Ownership | Owned, Shared, Foreign |
 | Soft blue | Context | Inferred, New, Changed, Optional, and any other label |
 
