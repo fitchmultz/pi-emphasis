@@ -79,8 +79,8 @@ pi
 An agent writes pills only when it is told how. In Pi's terminal interface the extension adds a `reply_style` section to the system prompt on every run, so there is nothing to paste into an `AGENTS.md`. The section tells the agent:
 
 - that `<reply_style>` governs visual presentation only in this terminal, while user and project instructions govern substance, plain language, and when plain text is required
-- to keep brief 1–2 line working updates plain (exempt from bold lead labels, mode pills, and action lead-ins), reserving full structure for substantive replies
-- which words to use for each color, requiring pills on substantive findings, failures, asks, unchecked claims, and costly or risky actions while keeping mode (`[[Verify]]`, etc.) and ownership pills optional when helpful
+- to keep routine 1–2 line progress updates plain (exempt from bold lead labels, mode pills, and action lead-ins), while still using red, yellow, or solid-red pills for failures, blockers, asks, or risky/costly actions and reserving full structure for substantive replies
+- which words to use for each color, requiring pills on failures/blockers, asks/unchecked claims, costly/risky actions, and substantive settled findings while keeping mode (`[[Verify]]`, etc.) and ownership pills optional when helpful
 - to follow attention pills with a short bold action lead-in (`**Check:**`, `**Do:**`, `**Next:**`, etc.), and to write labels as plain words so the extension adds icons
 
 The word lists in that section are read from the same tables that color the pills, so the rules and the drawing cannot drift apart. It adds about 700 tokens to the prompt. Print, JSON and RPC runs do not get the section, since nothing there draws pills.
@@ -92,6 +92,8 @@ To keep the drawing and write your own rules, set `PI_EMPHASIS_GUIDANCE=0`.
 Write `[[Word]]` beside the thing it describes. The word decides the color and the icon.
 
 ![Every pill word, grouped by color](screenshots/vocabulary.png)
+
+> Screenshot shows the full palette from the initial release (`Qualify` renders identically to `Verify`, which replaces it in the guidance below).
 
 | Color | Meaning | Words |
 |---|---|---|

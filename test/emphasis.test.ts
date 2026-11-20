@@ -159,9 +159,10 @@ describe("reply guidance", () => {
 	test("defers substance and plain-text rules to user/project instructions and exempts brief updates", () => {
 		assert.match(text, /visual presentation only/i);
 		assert.match(text, /user and project instructions govern substance/i);
-		assert.match(text, /exempt 1[–-]2 line working/i);
+		assert.match(text, /exempt routine 1[–-]2 line progress updates/i);
+		assert.match(text, /required red, yellow, and solid-red pills still apply/i);
 		assert.match(text, /cyan[^\n]*optional/i);
-		assert.match(text, /blue[^\n]*optional/i);
+		assert.match(text, /blue \(ownership[^\n]*optional when helpful/i);
 	});
 	test("stays compact to limit prompt overhead", () => {
 		const words = text.trim().split(/\s+/).length;
