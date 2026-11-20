@@ -4,7 +4,7 @@
 - **Look here:** [[Needs you]] [[Decision]] [[Unverified]] [[Partial]] [[Skipped]] [[In progress]] [[Pending]] [[At risk]]
 - **Settled:** [[Done]] [[Passed]] [[Observed]] [[Fixed]] [[Live]] [[Recommended]] [[Keep]]
 - **Consequences:** [[Costs money]] [[Destructive]] [[Irreversible]]
-- **Kind of work:** [[Brainstorm]] [[Investigate]] [[Preview]] [[Implement]] [[Qualify]]
+- **Kind of work:** [[Brainstorm]] [[Investigate]] [[Preview]] [[Implement]] [[Verify]]
 - **Ownership:** [[Owned]] [[Shared]] [[Foreign]]
 - **Context:** [[Inferred]] [[New]] [[Changed]] [[Optional]] [[Anything else]]
 
