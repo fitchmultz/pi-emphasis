@@ -110,11 +110,50 @@ describe("action lead-ins", () => {
 });
 
 describe("what is left alone", () => {
-	test("fenced code", () => {
-		const block = "```\n**Cause:** → [[Done]]\n```";
-		assert.equal(plain(block), block);
+	test("fenced and indented code blocks", () => {
+		for (const block of [
+			"```\n**Cause:** → [[Done]]\n```",
+			// Fences inside nested lists or blockquotes are still code to Pi's parser.
+			"- Step\n    - Sub step:\n\n      ```ts\n      /** Cause */ → [[Done]]\n      ```",
+			"> ```\n> **Cause:** → [[Done]]\n> ```",
+			"- item\n\n  ```md\n  ## Finding\n  ```",
+			"```text\n   ```sh\n**Cause:** → [[Done]]\n```",
+			"    **Cause:** → [[Done]]",
+			"```\r\n**Cause:** → [[Done]]\r\n```",
+		]) {
+			assert.equal(plain(block), block);
+		}
+		assert.equal(
+			plain("```text\n   ```sh\n```\n**After**"),
+			"```text\n   ```sh\n```\n**<mdLink>After</>**",
+		);
+		// Tabs are expanded to 3 spaces to match Pi's Markdown parser.
+		assert.equal(
+			plain("- Step\n\t```\n\t**Cause:** → [[Done]]\n\t```"),
+			"- Step\n   ```\n   **Cause:** → [[Done]]\n   ```",
+		);
 	});
-	test("inline code", () => assert.equal(plain("`[[Done]] → **x**`"), "`[[Done]] → **x**`"));
+	test("inline code", () => {
+		// Longer delimiters let a code span hold a shorter backtick run, as in ``a ` b`` and `` `x` ``.
+		for (const sample of [
+			"`[[Done]] → **x**`",
+			"``a ` **b** [[Done]] → c``",
+			"`` `[[Done]]` `` and `` `**x**` ``",
+			"`[[Done]]\n**Cause:**`",
+		]) {
+			assert.equal(plain(sample), sample);
+		}
+		assert.equal(plain("`` `x` `` then **y**"), "`` `x` `` then **<mdLink>y</>**");
+		assert.equal(
+			plain("| `[[Done]] \\| **x**` | **y** |\n|---|---|\n| a | b |"),
+			"| `[[Done]] \\| **x**` | **<mdLink>y</>** |\n|---|---|\n| a | b |",
+		);
+		// Preceding literal backticks in HTML comments, links, or unmatched runs do not shift the next code span.
+		assert.ok(plain("<!-- `[[Done]]` -->\n\n`[[Done]]`").endsWith("\n\n`[[Done]]`"));
+		assert.ok(plain("[link](https://example.com/`[[Done]]`) and `[[Done]]`").endsWith(" and `[[Done]]`"));
+		assert.equal(plain("\\`[[Done]]`\n\n`[[Done]]`"), "\\`|\uf00c Done|`\n\n`[[Done]]`");
+		assert.equal(plain("``[[Done]]`\n\n`[[Done]]`"), "``|\uf00c Done|`\n\n`[[Done]]`");
+	});
 	test("escaped asterisks", () => assert.equal(plain("\\*\\*not bold\\*\\*"), "\\*\\*not bold\\*\\*"));
 });
 

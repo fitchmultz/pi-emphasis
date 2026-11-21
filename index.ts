@@ -8,6 +8,7 @@
 // In the terminal interface it also adds a reply_style section to the system prompt, telling the
 // model how to write these (PI_EMPHASIS_GUIDANCE=0 turns that off).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Marked, type Token, type Tokens } from "@earendil-works/pi-tui";
 
 type Colorize = (text: string) => string;
 export type PillTone = "success" | "error" | "warning" | "danger" | "mode" | "owner" | "neutral";
@@ -147,27 +148,93 @@ export function createPalette(theme: ThemeLike, boldColor = "mdLink"): Palette {
 	};
 }
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 // Escaped bold markers, bold markers, or a [[pill]] of 1-32 characters.
 const INLINE = /(\\*)(\*\*|__)|\[\[([^\[\]\n]{1,32})\]\]/g;
+
+// Pi renders replies with marked (re-exported by pi-tui), so the same parser decides what is code.
+const parser = new Marked();
+
+function matchRaw(markdown: string, raw: string, from: number): [number, number] | undefined {
+	const trimmed = raw.replace(/\n+$/, "");
+	if (!trimmed) return undefined;
+	if (!trimmed.includes("\n") && !trimmed.includes("|")) {
+		const index = markdown.indexOf(trimmed, from);
+		return index < 0 ? undefined : [index, index + trimmed.length];
+	}
+	// marked strips each line's list indent or blockquote ">" prefix, and unescapes "\|" in table cells.
+	const lines = trimmed.split("\n").map((line) => RegExp.escape(line).replaceAll("\\|", "\\\\?\\|"));
+	const pattern = new RegExp(lines.join("\\r?\\n[ >]*"), "g");
+	pattern.lastIndex = from;
+	const match = pattern.exec(markdown);
+	return match ? [match.index, match.index + match[0].length] : undefined;
+}
+
+/** Where code blocks and code spans sit in the source, as [start, end) offsets in document order. */
+function codeRanges(markdown: string): [number, number][] {
+	const ranges: [number, number][] = [];
+	let from = 0;
+	function walk(tokens: readonly Token[]): void {
+		for (const token of tokens) {
+			if (token.type === "code" || token.type === "codespan") {
+				const hit = matchRaw(markdown, token.raw, from);
+				if (hit) {
+					ranges.push(hit);
+					from = hit[1];
+				}
+				continue;
+			}
+			if (token.type === "table" && "header" in token && "rows" in token) {
+				const table = token as Tokens.Table;
+				const hit = matchRaw(markdown, table.raw, from);
+				if (hit) from = hit[0];
+				for (const cell of table.header) walk(cell.tokens);
+				for (const row of table.rows) for (const cell of row) walk(cell.tokens);
+				if (hit) from = Math.max(from, hit[1]);
+				continue;
+			}
+			if (token.type === "list" && "items" in token) {
+				for (const item of (token as Tokens.List).items) walk(item.tokens);
+				continue;
+			}
+			if ("tokens" in token && Array.isArray(token.tokens)) {
+				const hit = token.type === "link" || token.type === "image" ? matchRaw(markdown, token.raw, from) : undefined;
+				if (hit) from = hit[0];
+				walk(token.tokens);
+				if (hit) from = Math.max(from, hit[1]);
+				continue;
+			}
+			if (token.raw) {
+				const hit = matchRaw(markdown, token.raw, from);
+				if (hit) from = hit[1];
+			}
+		}
+	}
+	walk(parser.lexer(markdown));
+	return ranges;
+}
 
 /** Apply colors to assistant Markdown, leaving code blocks, inline code and headings alone. */
 export function decorate(markdown: string, palette: Palette): string {
 	const [open, close] = palette.bold("\u0000").split("\u0000") as [string, string];
+	markdown = markdown.replace(/\t/g, "   "); // Pi turns tabs into three spaces before parsing, so parse what it parses.
+	const code = codeRanges(markdown);
 	const out: string[] = [];
-	let fence: string | undefined;
+	let start = 0;
+	let codeIndex = 0;
 	for (const line of markdown.split("\n")) {
-		const fenceMatch = line.match(FENCE);
-		if (fence) {
-			if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) fence = undefined;
-			out.push(line);
-		} else if (fenceMatch) {
-			fence = fenceMatch[1];
-			out.push(line);
-		} else if (/^ {0,3}#{1,6}\s/.test(line)) {
+		const end = start + line.length;
+		while (codeIndex < code.length && code[codeIndex][1] <= start) codeIndex++;
+		const spans: [number, number][] = [];
+		for (let i = codeIndex; i < code.length && code[i][0] < end; i++) {
+			const [s, e] = code[i];
+			if (e > start) spans.push([Math.max(s, start) - start, Math.min(e, end) - start]);
+		}
+		const first = line.search(/\S|$/);
+		start = end + 1;
+		if (/^ {0,3}#{1,6}\s/.test(line) && !spans.some(([s, e]) => s <= first && first < e)) {
 			out.push(line.replace(/^( {0,3}#{1,6}\s+)(.+)$/, (_, hashes: string, title: string) => hashes + withLabelIcon(title))); // Pi already colors headings.
 		} else {
-			out.push(decorateLine(line, palette, open, close));
+			out.push(decorateLine(line, spans, palette, open, close));
 		}
 	}
 	return out.join("\n");
@@ -202,9 +269,16 @@ function pill(label: string, palette: Palette): string {
 	return `${capL}${style.label}\x1b[1m${pad}${text}${pad}\x1b[22;27m\x1b[39m\x1b[49m${capR}`;
 }
 
-function decorateLine(line: string, palette: Palette, open: string, close: string): string {
-	// Odd parts are inline code spans, which stay untouched.
-	const parts = line.replace(LEAD_LABEL, (_, before: string, label: string, after: string) => before + withLabelIcon(label) + after).split(/(`+[^`]*?`+)/g);
+function decorateLine(line: string, code: readonly (readonly [number, number])[], palette: Palette, open: string, close: string): string {
+	// Odd parts are code, which stays untouched.
+	const parts: string[] = [];
+	let at = 0;
+	for (const [s, e] of code) {
+		parts.push(line.slice(at, s), line.slice(s, e));
+		at = e;
+	}
+	parts.push(line.slice(at));
+	parts[0] = parts[0].replace(LEAD_LABEL, (_, before: string, label: string, after: string) => before + withLabelIcon(label) + after);
 	let result = "";
 	let inBold: string | undefined;
 	const reopen = () => (inBold ? `\x1b[1m${open}` : "");
