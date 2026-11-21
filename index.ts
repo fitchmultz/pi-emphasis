@@ -162,7 +162,9 @@ function matchRaw(markdown: string, raw: string, from: number): [number, number]
 		return index < 0 ? undefined : [index, index + trimmed.length];
 	}
 	// marked strips each line's list indent or blockquote ">" prefix, and unescapes "\|" in table cells.
-	const lines = trimmed.split("\n").map((line) => RegExp.escape(line).replaceAll("\\|", "\\\\?\\|"));
+	const lines = trimmed
+		.split("\n")
+		.map((line) => line.replace(/[.*+?^${}()|[\]\\]/g, (ch) => (ch === "|" ? "\\\\?\\|" : `\\${ch}`)));
 	const pattern = new RegExp(lines.join("\\r?\\n[ >]*"), "g");
 	pattern.lastIndex = from;
 	const match = pattern.exec(markdown);
