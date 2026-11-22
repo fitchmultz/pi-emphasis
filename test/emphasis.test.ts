@@ -195,13 +195,23 @@ describe("reply guidance", () => {
 		assert.ok(text.includes("[[Verify]]"));
 		assert.doesNotMatch(text, /\[\[Qualify\]\]|\bQualify\b/i);
 	});
-	test("defers substance and plain-text rules to user/project instructions and exempts brief updates", () => {
+	test("prioritizes plain human prose and softens mandatory pill, lead-in, and bold stacking", () => {
+		assert.match(text, /^Plain, natural human prose always takes precedence over formatting decoration\./);
+		assert.match(text, /never turn questions, blockers, or explanations into dense pill-and-label chains or cryptic shorthand/i);
 		assert.match(text, /visual presentation only/i);
 		assert.match(text, /user and project instructions govern substance/i);
-		assert.match(text, /exempt routine 1[–-]2 line progress updates/i);
-		assert.match(text, /required red, yellow, and solid-red pills still apply/i);
+		assert.match(text, /keep routine 1[–-]2 line progress updates in plain prose/i);
+		assert.match(text, /red, yellow, or solid-red pills for real failures, blockers, asks, or risky\/costly actions/i);
+		assert.match(text, /green \(optional/i);
 		assert.match(text, /cyan[^\n]*optional/i);
-		assert.match(text, /blue \(ownership[^\n]*optional when helpful/i);
+		assert.match(text, /blue \(ownership[^\n]*optional/i);
+		assert.match(text, /evidence pills \(optional\)[^\n]*\[\[Observed\]\], \[\[Inferred\]\], or \[\[Unverified\]\]/i);
+		assert.match(text, /action lead-ins \(optional\)[^\n]*do not pair every pill with a bold lead-in/i);
+		assert.match(text, /labels and shapes \(optional\)/i);
+		assert.match(text, /bold selectively/i);
+		assert.doesNotMatch(text, /bold 1[–-]3/i);
+		assert.doesNotMatch(text, /mark evidence claims with/i);
+		assert.doesNotMatch(text, /follow red, yellow, solid-red/i);
 	});
 	test("stays compact to limit prompt overhead", () => {
 		const words = text.trim().split(/\s+/).length;

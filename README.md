@@ -78,10 +78,10 @@ pi
 
 An agent writes pills only when it is told how. In Pi's terminal interface the extension adds a `reply_style` section to the system prompt on every run, so there is nothing to paste into an `AGENTS.md`. The section tells the agent:
 
-- that `<reply_style>` governs visual presentation only in this terminal, while user and project instructions govern substance, plain language, and when plain text is required
-- to keep routine 1–2 line progress updates plain (exempt from bold lead labels, mode pills, and action lead-ins), while still using red, yellow, or solid-red pills for failures, blockers, asks, or risky/costly actions and reserving full structure for substantive replies
-- which words to use for each color, requiring pills on failures/blockers, asks/unchecked claims, costly/risky actions, and substantive settled findings while keeping mode (`[[Verify]]`, etc.) and ownership pills optional when helpful
-- to follow attention pills with a short bold action lead-in (`**Check:**`, `**Do:**`, `**Next:**`, etc.), and to write labels as plain words so the extension adds icons
+- that plain, natural human prose always takes precedence over formatting decoration (never turning questions, blockers, or explanations into dense pill-and-label chains or cryptic shorthand), while `<reply_style>` governs visual presentation only in this terminal and user and project instructions govern substance and plain-text requirements
+- to keep routine 1–2 line progress updates plain (without bold lead labels, mode pills, or action lead-ins), while still flagging real failures, blockers, asks, or risky/costly actions with red, yellow, or solid-red pills and saving headings and multi-part structure for longer replies
+- which words to use for each color, keeping pills sparse and purposeful: red, yellow, and solid-red for real failures, blockers, asks, decisions, or risky/costly actions, with green, cyan (`[[Verify]]`, etc.), blue, soft-blue, and evidence pills (`[[Observed]]`, `[[Inferred]]`, `[[Unverified]]`) optional when scanning or distinguishing observed facts from guesses genuinely helps
+- to treat action lead-ins (`**Check:**`, `**Do:**`, `**Next:**`, etc.), icon-backed labels, tree/arrow shapes, and bold text as optional aids—never forcing a lead-in after every pill or a bold quota per bullet—and to write labels as plain words so the extension adds icons
 
 The word lists in that section are read from the same tables that color the pills, so the rules and the drawing cannot drift apart. It adds about 700 tokens to the prompt. Print, JSON and RPC runs do not get the section, since nothing there draws pills.
 
