@@ -326,20 +326,21 @@ const actionLabels = (words: string[]) => words.map((w) => `**${w[0].toUpperCase
 /** The reply-style rules given to the model, with every word list read from the tables that draw them. */
 export function replyGuidance(): string {
 	const v = VOCABULARY;
-	return `These rules shape visual presentation only in this terminal, which colors pills, adds icons, and cannot change text size. User and project instructions govern substance, plain language, and when plain text is required.
+	return `Plain, natural human prose always takes precedence over formatting decoration. Never turn questions, blockers, or explanations into dense pill-and-label chains or cryptic shorthand. These rules shape visual presentation only in this terminal, which colors pills, adds icons, and cannot change text size. User and project instructions govern substance, plain language, and when plain text is required.
 
-- **Brief working updates stay plain.** Exempt routine 1–2 line progress updates from bold lead labels, mode pills, and action lead-ins; use plain prose with an optional [[In progress]] pill when helpful. Required red, yellow, and solid-red pills still apply whenever reporting a failure, blocker, ask, or risky/costly action. Reserve full structure for substantive replies: findings, blockers, decisions, comparisons, and final summaries.
-- **Labels and shapes.** On substantive replies, use short \`##\` headings (\`###\` shows hash marks) or bold lead labels as plain words—never type icon glyphs. Icon-backed labels: ${titled(Object.keys(LABEL_ICONS))}. Use \`├──\` and \`└──\` (indented, no list dash) for hierarchy, \`→\` for sequences, \`✓\` or \`✗\` beside checked items, and blockquotes for dim asides only.
-- **Bold and code.** Bold 1–3 anchor terms per paragraph or bullet (components, choices, lead labels, decisions). Reserve inline code for copyable literals (paths, commands, exact identifiers).
-- **Status pills.** Write \`[[Word]]\` beside its subject (optional short detail: [[Passed 12/12]], [[Failed: 3 tests]]). One pill per bullet or cell (except \`→\` sequences and a single count line); none in headings; never invent status words:
-  - **Red (required on failures/blockers):** ${pills(v.error.core)}.
-  - **Yellow (required on asks/unchecked claims):** ${pills(v.warning.core)}.
-  - **Green (required on substantive settled findings):** ${pills(v.success.core)}.
-  - **Solid red (required before dangerous/costly actions):** ${pills(v.danger.core)}.
-  - **Cyan (kind of work, optional when helpful):** ${pills(v.mode.core)}.
-  - **Blue (ownership outside task files, optional when helpful):** ${pills(v.owner.core)}.
-  - **Soft blue (context):** ${pills(CONTEXT_WORDS)}, and any other short label. Mark evidence claims with [[Observed]], [[Inferred]], or [[Unverified]].
-- **Action lead-ins.** Follow red, yellow, solid-red, and [[Inferred]] pills on substantive replies (optional for green) with a short bold action lead-in naming the concrete check, action, or next step: ${actionLabels(Object.keys(ACTION_ICONS))}.
+- **Brief updates stay plain.** Keep routine 1–2 line progress updates in plain prose, without bold lead labels, mode pills, or action lead-ins (an optional [[In progress]] pill is fine). Still use red, yellow, or solid-red pills for real failures, blockers, asks, or risky/costly actions. Save headings and multi-part layouts for longer replies (findings, comparisons, final summaries).
+- **Status pills (sparse and purposeful).** Write \`[[Word]]\` beside its subject (optional short detail: [[Passed 12/12]], [[Failed: 3 tests]]). At most one pill per bullet or cell (except \`→\` sequences and a single count line); none in headings; never invent status words:
+  - **Red (use for real failures or blockers):** ${pills(v.error.core)}.
+  - **Yellow (use for real asks, decisions, or notable risks):** ${pills(v.warning.core)}.
+  - **Solid red (use before risky or costly actions):** ${pills(v.danger.core)}.
+  - **Green (optional when scanning benefits):** ${pills(v.success.core)}.
+  - **Cyan (kind of work, optional):** ${pills(v.mode.core)}.
+  - **Blue (ownership outside task files, optional):** ${pills(v.owner.core)}.
+  - **Soft blue (context, optional):** ${pills(CONTEXT_WORDS)}, and any other short label.
+  - **Evidence pills (optional):** use [[Observed]], [[Inferred]], or [[Unverified]] only when distinguishing unverified guesses from observed facts helps—do not tag every claim.
+- **Action lead-ins (optional).** Do not pair every pill with a bold lead-in. Use ${actionLabels(Object.keys(ACTION_ICONS))} only when a short scannable action line helps, never when a plain sentence is clearer.
+- **Labels and shapes (optional).** Only when grouping helps, use short \`##\` headings (\`###\` shows hash marks) or plain-word bold lead labels—never type icon glyphs or label every bullet. Icon-backed labels: ${titled(Object.keys(LABEL_ICONS))}. Only when clearer than plain prose or lists, use \`├──\`/\`└──\` (indented, no list dash) for trees, \`→\` for sequences, \`✓\`/\`✗\` for checked items, and blockquotes for dim asides.
+- **Bold and code.** Bold selectively when a key term aids scanning—no quota per paragraph or bullet. Reserve inline code for copyable literals (paths, commands, exact identifiers).
 - **Closing line.** If instructions require a final status line, let that single line carry the closing state or ask (for example [[Done]], [[In progress]], or [[Needs you]]) rather than adding a second closing line.
 - **Clean copyable text.** Omit pills and tree shapes inside paths, commands, code, literal output, machine-readable data, copy-paste blocks, external drafts, and plain-text requests.`;
 }
