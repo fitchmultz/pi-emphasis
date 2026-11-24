@@ -139,14 +139,12 @@ To add a word, an icon or a synonym, edit the tables at the top of [`index.ts`](
 | Boxes or question marks in or around pills | The terminal has no Nerd Font symbols | [Set up your terminal](#set-up-your-terminal), or turn icons and rounded ends off |
 | Icons that overlap the next letter | The font draws its icons two cells wide | Use the "Mono" variant of the Nerd Font, such as JetBrainsMono Nerd Font Mono |
 | Pills that are all one color, in reverse video | Pi's theme has no panel colors, which happens with the `system` theme when the terminal reports none | Choose a theme with `/theme`, such as `dark` |
-| Solid red, cyan or blue pills in odd shades | Those three use your terminal's own colors | Change the terminal's color theme |
 | Bold that looks no heavier than normal text | The terminal draws normal text at a medium weight, or its font has no real bold | Choose a font with a distinct bold. In Ghostty, `font-style-bold` selects a heavier face |
 | The agent writes no pills | The rules reach the agent only in Pi's terminal interface, and not when `PI_EMPHASIS_GUIDANCE=0` | Unset the variable. Print, JSON and RPC runs never get the rules |
 | Pills inside code blocks stay as typed | Code is left alone on purpose | Nothing to fix |
 
 ## Limits
 
-- A bold span that continues onto a second source line is colored only on its first line.
 - Checked on macOS only, in Ghostty and the Herdr app.
 
 ## Development

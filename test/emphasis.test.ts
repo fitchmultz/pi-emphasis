@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { describe, test } from "node:test";
-import type {
-	BeforeAgentStartEvent,
-	ExtensionAPI,
-	ExtensionContext,
-	MarkdownMessageType,
-	MarkdownTransformContext,
-	MarkdownTransformer,
-	SessionStartEvent,
+import {
+	Theme,
+	getMarkdownTheme,
+	initTheme,
+	type BeforeAgentStartEvent,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type MarkdownMessageType,
+	type MarkdownTransformContext,
+	type MarkdownTransformer,
+	type SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import { Markdown } from "@earendil-works/pi-tui";
 import emphasis, {
 	CONTEXT_WORDS,
 	VOCABULARY,
@@ -96,8 +101,140 @@ describe("labels", () => {
 		assert.equal(plain("**Cause:** x"), "**<mdLink>\uf0e7 Cause:</>** x");
 		assert.equal(plain("- **Fix:** x"), "- **<mdLink>\uf0ad Fix:</>** x");
 		assert.equal(plain("  ├── **Risk:** x"), "  <dim>├──</> **<mdLink>\uf071 Risk:</>** x");
+		assert.equal(plain("> **Cause:** x"), "> **<mdLink>\uf0e7 Cause:</>** x");
+		assert.equal(plain("- [x] **Result:** x"), "- [x] **<mdLink>\uf11e Result:</>** x");
 	});
 	test("bold later in a line gets color but no icon", () => assert.equal(plain("see **Cause** here"), "see **<mdLink>Cause</>** here"));
+});
+
+describe("headings, links, blockquotes, and multiline bold", () => {
+	test("headings decorate pills and marks while keeping heading color and bold weight", () => {
+		assert.equal(
+			plain("### 1. Refresh (`AI-3978`) [[Decision]]"),
+			"### 1. Refresh (`AI-3978`) |\uf126 Decision|",
+		);
+		assert.equal(plain("## Finding [[Broken]]"), "## \uf002 Finding |\uf127 Broken|");
+		assert.equal(
+			plain("## Migrate A → B ✓ ✗"),
+			"## Migrate A <accent>→</> B <success>✓</> <error>✗</>",
+		);
+		assert.equal(plain("## **Keep heading color** [[Done]]"), "## **Keep heading color** |\uf00c Done|");
+		assert.equal(plain("> ## Status [[Blocked]]"), "> ## \uf012 Status |\uf05e Blocked|");
+
+		const h1Raw = decorate("# Release [[Live]] today", palette);
+		assert.ok(h1Raw.includes("\x1b[24;22m"), "H1 pill should suspend underline before caps");
+		assert.ok(h1Raw.includes("\x1b[1m\x1b[4m\x1b[38;fg-mdHeadingm today"), "H1 text after pill should restore bold, underline, and heading color");
+
+		const h2Raw = decorate("## Status [[Blocked]] on deploy", palette);
+		assert.ok(h2Raw.includes("\x1b[1m\x1b[38;fg-mdHeadingm on deploy"), "H2 text after pill should restore bold and heading color");
+	});
+
+	test("blockquotes restore quote color after pills and marks", () => {
+		const raw = decorate("> [[Blocked]] in quote → next", palette);
+		assert.ok(raw.includes("\x1b[38;fg-mdQuotem in quote"));
+		assert.ok(raw.includes("<accent>→</>\x1b[38;fg-mdQuotem next"));
+	});
+
+	test("bold spans spanning multiple lines color every line without breaking quote prefixes", () => {
+		assert.equal(
+			plain("**first line\nsecond line**"),
+			"**<mdLink>first line</>\n<mdLink>second line</>**",
+		);
+		assert.equal(
+			plain("> **first\n> second**"),
+			"> **<mdLink>first</>\n> <mdLink>second</>**",
+		);
+	});
+
+	test("intraword underscores, spaced markers, and Markdown links are not corrupted", () => {
+		assert.equal(plain("foo__bar__baz and ** foo **"), "foo__bar__baz and ** foo **");
+		assert.equal(
+			plain("[**bold link**](https://example.com/__foo__)"),
+			"[**bold link**](https://example.com/__foo__)",
+		);
+		assert.equal(
+			plain("Use **mitchfultz@gmail.com** and **https://example.com**"),
+			"Use **mitchfultz@gmail.com** and **https://example.com**",
+		);
+		assert.equal(
+			plain("**contact mitch@workos.com today**"),
+			"**<mdLink>contact</> mitch@workos.com <mdLink>today</>**",
+		);
+		assert.equal(
+			plain("**(https://example.com) is live**"),
+			"**(https://example.com) <mdLink>is live</>**",
+		);
+		assert.equal(
+			plain("**email:mitch@workos.com**"),
+			"**<mdLink>email</>:mitch@workos.com**",
+		);
+		assert.equal(
+			plain("Status [[Done]]\nand [text [[Done]]](https://example.com) and [[Fixed]]"),
+			"Status |\uf00c Done|\nand [text [[Done]]](https://example.com) and |\uf0ad Fixed|",
+		);
+	});
+});
+
+describe("solid pills and real Pi Markdown rendering", () => {
+	test("solid pills derive from theme foreground tokens and match bold on ANSI 0-7 caps", () => {
+		const dangerRaw = decorate("[[Costs money]]", palette);
+		const modeRaw = decorate("[[Verify]]", palette);
+		const ownerRaw = decorate("[[Owned]]", palette);
+		assert.ok(dangerRaw.includes("\x1b[38;fg-errorm\x1b[7m"));
+		assert.ok(modeRaw.includes("\x1b[38;fg-syntaxVariablem\x1b[7m"));
+		assert.ok(ownerRaw.includes("\x1b[38;fg-mdLinkm\x1b[7m"));
+
+		const systemTheme: ThemeLike = {
+			fg: (_c: string, t: string) => t,
+			getFgAnsi: (color: string) =>
+				color === "error" ? "\x1b[38;5;1m" : color === "syntaxVariable" ? "\x1b[38;5;6m" : "\x1b[38;5;4m",
+			getBgAnsi: () => "\x1b[49m",
+		} as unknown as ThemeLike;
+		const sysPalette = createPalette(systemTheme);
+		const sysDanger = decorate("[[Costs money]]", sysPalette);
+		assert.ok(sysDanger.includes("\x1b[1m\x1b[38;5;1m\ue0b6\x1b[22m\x1b[39m"));
+		assert.ok(sysDanger.includes("\x1b[1m\x1b[38;5;1m\ue0b4\x1b[22m\x1b[39m"));
+	});
+
+	test("real Pi Markdown renders headings, bold autolinks, links, and solid pills without leaked SGR", () => {
+		initTheme("dark", false);
+		const darkJson = JSON.parse(
+			fs.readFileSync(
+				new URL("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/dark.json", import.meta.url),
+				"utf8",
+			),
+		) as { vars?: Record<string, string>; colors: Record<string, string> };
+		const resolve = (v: string) => (darkJson.vars?.[v] ?? v);
+		const fgMap: Record<string, string> = {};
+		const bgMap: Record<string, string> = {};
+		for (const [k, v] of Object.entries(darkJson.colors)) {
+			if (k.endsWith("Bg")) bgMap[k] = resolve(v);
+			else fgMap[k] = resolve(v);
+		}
+		const realTheme = new Theme(fgMap as never, bgMap as never, "truecolor");
+		const realPalette = createPalette(realTheme as unknown as ThemeLike);
+		const mdTheme = getMarkdownTheme();
+		const stripAnsi = (s: string) =>
+			s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
+
+		const sample = [
+			"### 1. Refresh (`AI-3978`) [[Decision]]",
+			"# Release [[Live]] today",
+			"Use **mitchfultz@gmail.com** and **https://example.com** and [**bold link**](https://example.com/__foo__).",
+			"Broken bracket link [text [[Done]]](https://example.com) and [[Costs money]] [[Verify]] [[Owned]].",
+		].join("\n\n");
+
+		const rendered = new Markdown(decorate(sample, realPalette), 0, 0, mdTheme).render(120).join("\n");
+		const visible = stripAnsi(rendered);
+		assert.ok(visible.includes("\ue0b6\uf126\u00a0Decision\ue0b4"), "heading pill should render");
+		assert.ok(visible.includes("\ue0b6\uf135\u00a0Live\ue0b4 today"), "H1 pill and trailing text should render");
+		assert.ok(visible.includes("mitchfultz@gmail.com"), "bold email should stay intact");
+		assert.ok(visible.includes("bold link"), "bold markdown link label should stay intact");
+		assert.doesNotMatch(visible, /\b(?:39m|208m|129m|186m)\b/, "no ANSI SGR fragments should leak into visible text");
+		assert.ok(rendered.includes("\x1b]8;;mailto:mitchfultz@gmail.com"), "email autolink should remain clean OSC 8");
+		assert.ok(rendered.includes("\x1b]8;;https://example.com/__foo__"), "explicit link URL with underscores should remain intact");
+		assert.ok(!rendered.includes("\x1b[24m\x1b[4m"), "H1 pill should not have underline re-enabled across caps");
+	});
 });
 
 describe("action lead-ins", () => {

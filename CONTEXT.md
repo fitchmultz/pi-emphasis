@@ -21,11 +21,11 @@ All rules live in `index.ts` and are tested in `test/emphasis.test.ts` without P
 - Which tone a word has, and which words agents are told to write: `VOCABULARY` (`core` is taught, `also` is only accepted), read by `toneOf`.
 - Which icon a pill word has: `PILL_ICONS`.
 - Which words are synonyms: `SYNONYMS`.
-- Which labels take an icon: `LABEL_ICONS`, applied by `withLabelIcon`.
+- Which labels take an icon: `LABEL_ICONS`, applied by `labelIconFor`.
 - Which lead-in words take an icon after a pill: `ACTION_ICONS`.
 - What the agent is told: `replyGuidance`, whose word lists are read from the tables above.
 - How a pill label splits into icon, word and detail: `splitLabel`.
-- What is left untouched (fenced code, inline code, escaped markers): `decorate` and `decorateLine`.
+- What is left untouched (fenced code, inline code, links, HTML, escaped markers): `decorate`.
 
 ## Border
 
