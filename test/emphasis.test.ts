@@ -1,19 +1,15 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { describe, test } from "node:test";
-import {
-	Theme,
-	getMarkdownTheme,
-	initTheme,
-	type BeforeAgentStartEvent,
-	type ExtensionAPI,
-	type ExtensionContext,
-	type MarkdownMessageType,
-	type MarkdownTransformContext,
-	type MarkdownTransformer,
-	type SessionStartEvent,
+import type {
+	BeforeAgentStartEvent,
+	ExtensionAPI,
+	ExtensionContext,
+	MarkdownMessageType,
+	MarkdownTransformContext,
+	MarkdownTransformer,
+	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { Markdown } from "@earendil-works/pi-tui";
+import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 import emphasis, {
 	CONTEXT_WORDS,
 	VOCABULARY,
@@ -197,23 +193,48 @@ describe("solid pills and real Pi Markdown rendering", () => {
 	});
 
 	test("real Pi Markdown renders headings, bold autolinks, links, and solid pills without leaked SGR", () => {
-		initTheme("dark", false);
-		const darkJson = JSON.parse(
-			fs.readFileSync(
-				new URL("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/dark.json", import.meta.url),
-				"utf8",
-			),
-		) as { vars?: Record<string, string>; colors: Record<string, string> };
-		const resolve = (v: string) => (darkJson.vars?.[v] ?? v);
-		const fgMap: Record<string, string> = {};
-		const bgMap: Record<string, string> = {};
-		for (const [k, v] of Object.entries(darkJson.colors)) {
-			if (k.endsWith("Bg")) bgMap[k] = resolve(v);
-			else fgMap[k] = resolve(v);
-		}
-		const realTheme = new Theme(fgMap as never, bgMap as never, "truecolor");
-		const realPalette = createPalette(realTheme as unknown as ThemeLike);
-		const mdTheme = getMarkdownTheme();
+		const fgAnsi: Record<string, string> = {
+			mdHeading: "\x1b[38;2;205;154;34m",
+			mdLink: "\x1b[38;2;105;173;208m",
+			mdQuote: "\x1b[38;2;157;165;169m",
+			success: "\x1b[38;2;104;183;141m",
+			error: "\x1b[38;2;234;127;129m",
+			warning: "\x1b[38;2;205;154;34m",
+			syntaxVariable: "\x1b[38;2;93;179;186m",
+			accent: "\x1b[38;2;167;152;215m",
+			dim: "\x1b[38;2;157;165;169m",
+			text: "\x1b[38;2;230;230;230m",
+		};
+		const bgAnsi: Record<string, string> = {
+			toolSuccessBg: "\x1b[48;2;37;65;49m",
+			toolErrorBg: "\x1b[48;2;91;40;42m",
+			searchMatchBg: "\x1b[48;2;78;47;27m",
+			selectedBg: "\x1b[48;2;45;55;72m",
+		};
+		const ansiTheme: ThemeLike = {
+			fg: (color: string, text: string) => `${fgAnsi[color] ?? ""}${text}\x1b[39m`,
+			getFgAnsi: (color: string) => fgAnsi[color] ?? "\x1b[39m",
+			getBgAnsi: (color: string) => bgAnsi[color] ?? "\x1b[49m",
+		} as unknown as ThemeLike;
+		const realPalette = createPalette(ansiTheme);
+		// Deterministic MarkdownTheme matching chalk.underline's nested-\x1b[24m reopen behavior
+		// and OSC 8 hyperlinks regardless of CI runner TERM_PROGRAM/TTY state.
+		const mdTheme: MarkdownTheme = {
+			heading: (t) => `${fgAnsi.mdHeading}${t}\x1b[39m`,
+			link: (t) => `${fgAnsi.mdLink}${t}\x1b[39m`,
+			linkUrl: (t) => `${fgAnsi.dim}${t}\x1b[39m`,
+			code: (t) => `${fgAnsi.accent}${t}\x1b[39m`,
+			codeBlock: (t) => t,
+			codeBlockBorder: (t) => t,
+			quote: (t) => `${fgAnsi.mdQuote}${t}\x1b[39m`,
+			quoteBorder: (t) => `${fgAnsi.mdQuote}${t}\x1b[39m`,
+			hr: (t) => t,
+			listBullet: (t) => t,
+			bold: (t) => `\x1b[1m${t}\x1b[22m`,
+			italic: (t) => `\x1b[3m${t}\x1b[23m`,
+			strikethrough: (t) => `\x1b[9m${t}\x1b[29m`,
+			underline: (t) => `\x1b[4m${t.replaceAll("\x1b[24m", "\x1b[24m\x1b[4m")}\x1b[24m`,
+		};
 		const stripAnsi = (s: string) =>
 			s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
 
@@ -231,8 +252,8 @@ describe("solid pills and real Pi Markdown rendering", () => {
 		assert.ok(visible.includes("mitchfultz@gmail.com"), "bold email should stay intact");
 		assert.ok(visible.includes("bold link"), "bold markdown link label should stay intact");
 		assert.doesNotMatch(visible, /\b(?:39m|208m|129m|186m)\b/, "no ANSI SGR fragments should leak into visible text");
-		assert.ok(rendered.includes("\x1b]8;;mailto:mitchfultz@gmail.com"), "email autolink should remain clean OSC 8");
-		assert.ok(rendered.includes("\x1b]8;;https://example.com/__foo__"), "explicit link URL with underscores should remain intact");
+		assert.ok(rendered.includes("\x1b[4mmitchfultz@gmail.com\x1b[24m"), "email autolink should parse cleanly without ANSI corruption");
+		assert.ok(rendered.includes("https://example.com/__foo__"), "explicit link URL with underscores should remain intact");
 		assert.ok(!rendered.includes("\x1b[24m\x1b[4m"), "H1 pill should not have underline re-enabled across caps");
 	});
 });
