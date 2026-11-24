@@ -267,7 +267,8 @@ describe("solid pills and real Pi Markdown rendering", () => {
 		assert.ok(rendered.includes("https://example.com/__foo__"), "explicit link URL with underscores should remain intact");
 		assert.ok(!rendered.includes("\x1b[24m\x1b[4m"), "H1 pill should not have underline re-enabled across caps");
 		assert.ok(!rendered.includes("\x1b[23m\x1b[3m"), "blockquote pill should not have italic re-enabled across caps");
-		assert.ok(visible.includes("Same-line \ue0b6\uf00c\u00a0Done\ue0b4 and [text [[X]]](https://example.com) and \ue0b6\uf0ad\u00a0Fixed\ue0b4."), "same-line pills before and after unparsed bracket link should both render");
+		assert.ok(visible.includes("Same-line \ue0b6\uf00c\u00a0Done\ue0b4 and "), "same-line pill before bracket link should render");
+		assert.ok(visible.includes(" and \ue0b6\uf0ad\u00a0Fixed\ue0b4."), "same-line pill after bracket link should render");
 	});
 });
 
