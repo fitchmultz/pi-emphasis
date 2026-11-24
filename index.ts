@@ -16,6 +16,10 @@ export type PillTone = "success" | "error" | "warning" | "danger" | "mode" | "ow
 export interface Palette {
 	/** Wraps bold text in a color. */
 	bold: Colorize;
+	/** Raw foreground escape used to restore heading color after inline pills or marks. */
+	headingAnsi?: string;
+	/** Raw foreground escape used to restore blockquote color after inline pills or marks. */
+	quoteAnsi?: string;
 	passed?: Colorize;
 	failed?: Colorize;
 	/** Opening escapes for each pill tone: label colors and the cap color. */
@@ -114,7 +118,8 @@ function bgToFg(bg: string): string {
 	return bg.replace(/\x1b\[48;/g, "\x1b[38;").replace(/\x1b\[(4|10)([0-7])m/g, (_, p: string, n: string) => `\x1b[${p === "4" ? "3" : "9"}${n}m`);
 }
 
-const solid = (code: number) => ({ label: `\x1b[${code}m\x1b[7m`, cap: `\x1b[${code}m` });
+// Indexed ANSI 0–7 foreground escapes; bold-is-bright terminals promote these to bright 8–15 when bold.
+const LOW_INDEXED_FG = /^\x1b\[(?:3[0-7]|38;5;[0-7])m$/;
 
 export function createPalette(theme: ThemeLike, boldColor = "mdLink"): Palette {
 	const fg = (name: string) => (text: string) => theme.fg(name as never, text);
@@ -128,8 +133,15 @@ export function createPalette(theme: ThemeLike, boldColor = "mdLink"): Palette {
 		}
 		return { label: bgAnsi + theme.getFgAnsi(labelFg as never), cap: bgToFg(bgAnsi) };
 	};
+	const solidTone = (color: string, fallbackCode: number) => {
+		const fgAnsi = theme.getFgAnsi(color as never);
+		const base = fgAnsi && !/^\x1b\[39m$/.test(fgAnsi) ? fgAnsi : `\x1b[${fallbackCode}m`;
+		return { label: `${base}\x1b[7m`, cap: base };
+	};
 	return {
 		bold: fg(boldColor),
+		headingAnsi: theme.getFgAnsi("mdHeading" as never),
+		quoteAnsi: theme.getFgAnsi("mdQuote" as never),
 		passed: fg("success"),
 		failed: fg("error"),
 		pills: {
@@ -137,10 +149,11 @@ export function createPalette(theme: ThemeLike, boldColor = "mdLink"): Palette {
 			error: tone("error", "toolErrorBg"),
 			warning: tone("warning", "searchMatchBg"),
 			neutral: tone("text", "selectedBg"),
-			// Solid chips in the terminal's own magenta, cyan and blue: louder than the panel-colored tones.
-			danger: solid(31),
-			mode: solid(36),
-			owner: solid(34),
+			// Solid reverse-video chips in the active theme's error, cyan, and blue tones so
+			// they stay consistent across terminals and do not split under bold-is-bright.
+			danger: solidTone("error", 31),
+			mode: solidTone("syntaxVariable", 36),
+			owner: solidTone("mdLink", 34),
 		},
 		arrow: fg("accent"),
 		tree: fg("dim"),
@@ -148,175 +161,406 @@ export function createPalette(theme: ThemeLike, boldColor = "mdLink"): Palette {
 	};
 }
 
-// Escaped bold markers, bold markers, or a [[pill]] of 1-32 characters.
-const INLINE = /(\\*)(\*\*|__)|\[\[([^\[\]\n]{1,32})\]\]/g;
-
-// Pi renders replies with marked (re-exported by pi-tui), so the same parser decides what is code.
+// Pi renders replies with marked (re-exported by pi-tui), so the same parser decides structure.
 const parser = new Marked();
 
-function matchRaw(markdown: string, raw: string, from: number): [number, number] | undefined {
+function matchRaw(markdown: string, raw: string, from: number, limit: number): [number, number] | undefined {
 	const trimmed = raw.replace(/\n+$/, "");
 	if (!trimmed) return undefined;
 	if (!trimmed.includes("\n") && !trimmed.includes("|")) {
 		const index = markdown.indexOf(trimmed, from);
-		return index < 0 ? undefined : [index, index + trimmed.length];
+		return index < 0 || index + trimmed.length > limit ? undefined : [index, index + trimmed.length];
 	}
 	// marked strips each line's list indent or blockquote ">" prefix, and unescapes "\|" in table cells.
 	const lines = trimmed
 		.split("\n")
 		.map((line) => line.replace(/[.*+?^${}()|[\]\\]/g, (ch) => (ch === "|" ? "\\\\?\\|" : `\\${ch}`)));
-	const pattern = new RegExp(lines.join("\\r?\\n[ >]*"), "g");
-	pattern.lastIndex = from;
-	const match = pattern.exec(markdown);
-	return match ? [match.index, match.index + match[0].length] : undefined;
-}
-
-/** Where code blocks and code spans sit in the source, as [start, end) offsets in document order. */
-function codeRanges(markdown: string): [number, number][] {
-	const ranges: [number, number][] = [];
-	let from = 0;
-	function walk(tokens: readonly Token[]): void {
-		for (const token of tokens) {
-			if (token.type === "code" || token.type === "codespan") {
-				const hit = matchRaw(markdown, token.raw, from);
-				if (hit) {
-					ranges.push(hit);
-					from = hit[1];
-				}
-				continue;
-			}
-			if (token.type === "table" && "header" in token && "rows" in token) {
-				const table = token as Tokens.Table;
-				const hit = matchRaw(markdown, table.raw, from);
-				if (hit) from = hit[0];
-				for (const cell of table.header) walk(cell.tokens);
-				for (const row of table.rows) for (const cell of row) walk(cell.tokens);
-				if (hit) from = Math.max(from, hit[1]);
-				continue;
-			}
-			if (token.type === "list" && "items" in token) {
-				for (const item of (token as Tokens.List).items) walk(item.tokens);
-				continue;
-			}
-			if ("tokens" in token && Array.isArray(token.tokens)) {
-				const hit = token.type === "link" || token.type === "image" ? matchRaw(markdown, token.raw, from) : undefined;
-				if (hit) from = hit[0];
-				walk(token.tokens);
-				if (hit) from = Math.max(from, hit[1]);
-				continue;
-			}
-			if (token.raw) {
-				const hit = matchRaw(markdown, token.raw, from);
-				if (hit) from = hit[1];
-			}
-		}
-	}
-	walk(parser.lexer(markdown));
-	return ranges;
-}
-
-/** Apply colors to assistant Markdown, leaving code blocks, inline code and headings alone. */
-export function decorate(markdown: string, palette: Palette): string {
-	const [open, close] = palette.bold("\u0000").split("\u0000") as [string, string];
-	markdown = markdown.replace(/\t/g, "   "); // Pi turns tabs into three spaces before parsing, so parse what it parses.
-	const code = codeRanges(markdown);
-	const out: string[] = [];
-	let start = 0;
-	let codeIndex = 0;
-	for (const line of markdown.split("\n")) {
-		const end = start + line.length;
-		while (codeIndex < code.length && code[codeIndex][1] <= start) codeIndex++;
-		const spans: [number, number][] = [];
-		for (let i = codeIndex; i < code.length && code[i][0] < end; i++) {
-			const [s, e] = code[i];
-			if (e > start) spans.push([Math.max(s, start) - start, Math.min(e, end) - start]);
-		}
-		const first = line.search(/\S|$/);
-		start = end + 1;
-		if (/^ {0,3}#{1,6}\s/.test(line) && !spans.some(([s, e]) => s <= first && first < e)) {
-			out.push(line.replace(/^( {0,3}#{1,6}\s+)(.+)$/, (_, hashes: string, title: string) => hashes + withLabelIcon(title))); // Pi already colors headings.
-		} else {
-			out.push(decorateLine(line, spans, palette, open, close));
-		}
-	}
-	return out.join("\n");
+	const pattern = new RegExp(lines.join("\\r?\\n[ >]*"));
+	const match = pattern.exec(markdown.slice(from, limit));
+	return match ? [from + match.index, from + match.index + match[0].length] : undefined;
 }
 
 /** Lead-in words that name the action a pill calls for. With a colon they take an icon anywhere in a line. */
 const ACTION_ICONS: Record<string, string> = {
 	check: "\uf046", do: "\uf0a4", next: "\uf061", unblock: "\uf09c", left: "\uf141", run: "\uf04b", guard: "\uf132", undo: "\uf0e2", see: "\uf08e",
 };
-const ACTION_LABEL = new RegExp(`(\\*\\*)(${Object.keys(ACTION_ICONS).join("|")})(:\\*\\*)`, "gi");
 
-/** Prefix a known label with its icon, unless it already opens with a glyph. */
-function withLabelIcon(label: string): string {
-	if (OWN_ICON.test(label) || process.env.PI_EMPHASIS_PILL_ICONS === "0") return label;
+const PILL_RE = /\[\[([^\[\]\n]{1,32})\]\]/g;
+const LINE_LEAD_PREFIX = /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:\[[ xX]\][ \t]+)?(?:[├└]──[ \t]+)?$/;
+const ATX_HEADING_PREFIX = /^ {0,3}#{1,6}[ \t]+/;
+const TRAILING_PILLS = /(?:\s*\[\[[^\[\]\n]{1,32}\]\])+\s*$/;
+
+/** Return the Nerd Font icon for a known heading or leading bold label, or undefined. */
+function labelIconFor(label: string): string | undefined {
+	if (OWN_ICON.test(label) || process.env.PI_EMPHASIS_PILL_ICONS === "0") return undefined;
 	const word = label.replace(/[:\s]+$/, "").trim().toLowerCase();
-	const icon = LABEL_ICONS[word] ?? (label.trimEnd().endsWith(":") ? ACTION_ICONS[word] : undefined);
-	return icon ? `${icon} ${label}` : label;
+	return LABEL_ICONS[word] ?? (label.trimEnd().endsWith(":") ? ACTION_ICONS[word] : undefined);
 }
 
-// A line's leading bold label, after an optional list marker or tree connector.
-const LEAD_LABEL = /^(\s*(?:[-*+]|\d+\.)?\s*(?:[├└]──\s*)?\*\*)([^*`\n]{1,32})(\*\*)/;
+/** Return the Nerd Font icon for an inline action lead-in (`**Check:**`, `**Next:**`, etc.). */
+function actionIconFor(label: string): string | undefined {
+	if (OWN_ICON.test(label) || process.env.PI_EMPHASIS_PILL_ICONS === "0") return undefined;
+	if (!label.trimEnd().endsWith(":")) return undefined;
+	const word = label.slice(0, -1).trim().toLowerCase();
+	return ACTION_ICONS[word];
+}
 
-function pill(label: string, palette: Palette): string {
+function isBareAutolink(token: Token | undefined): boolean {
+	return token?.type === "link" && !token.raw.startsWith("[") && !token.raw.startsWith("<");
+}
+
+interface DecorateContext {
+	headingDepth: number;
+	inBold: boolean;
+	inItalic: boolean;
+	inQuote: boolean;
+	boldOpen: string;
+	boldClose: string;
+	pendingIcon?: string;
+}
+
+function pill(label: string, palette: Palette, disableUnderline: boolean, disableItalic: boolean): string {
 	const style = palette.pills![toneOf(label)];
 	// No-break spaces keep a two-word pill on one line when Pi wraps the paragraph.
 	const { icon, word } = splitLabel(label);
 	const text = (icon && word && process.env.PI_EMPHASIS_PILL_ICONS !== "0" ? `${icon} ${word}` : word || label.trim()).replace(/ /g, "\u00a0");
 	const [left, right] = palette.roundCaps ? ["\ue0b6", "\ue0b4"] : ["", ""];
 	const pad = palette.roundCaps ? "" : "\u00a0";
-	const capL = left ? `${style.cap}${left}\x1b[39m` : "";
-	const capR = right ? `${style.cap}${right}\x1b[39m` : "";
-	return `${capL}${style.label}\x1b[1m${pad}${text}${pad}\x1b[22;27m\x1b[39m\x1b[49m${capR}`;
+	// Terminals with bold-is-bright promote bold ANSI 0–7 to bright 8–15; match bold on caps
+	// for those codes so caps and body stay the same shade.
+	const capBold = LOW_INDEXED_FG.test(style.cap);
+	const capL = left ? `${capBold ? "\x1b[1m" : ""}${style.cap}${left}${capBold ? "\x1b[22m" : ""}\x1b[39m` : "";
+	const capR = right ? `${capBold ? "\x1b[1m" : ""}${style.cap}${right}${capBold ? "\x1b[22m" : ""}\x1b[39m` : "";
+	// Use combined SGR (e.g. 24;22 or 23;22) so chalk.underline()/chalk.italic() do not rewrite
+	// standalone \x1b[24m or \x1b[23m back on across pill caps and labels.
+	const resets: string[] = [];
+	if (disableUnderline) resets.push("24");
+	if (disableItalic) resets.push("23");
+	const prefix = resets.length > 0 ? `\x1b[${resets.join(";")};22m` : "";
+	return `${prefix}${capL}${style.label}\x1b[1m${pad}${text}${pad}\x1b[22;27m\x1b[39m\x1b[49m${capR}`;
 }
 
-function decorateLine(line: string, code: readonly (readonly [number, number])[], palette: Palette, open: string, close: string): string {
-	// Odd parts are code, which stays untouched.
-	const parts: string[] = [];
-	let at = 0;
-	for (const [s, e] of code) {
-		parts.push(line.slice(at, s), line.slice(s, e));
-		at = e;
+function restoreAfterPill(ctx: DecorateContext, palette: Palette): string {
+	const italic = ctx.inItalic ? "\x1b[3m" : "";
+	if (ctx.headingDepth > 0) {
+		const underline = ctx.headingDepth === 1 ? "\x1b[4m" : "";
+		return `\x1b[1m${underline}${italic}${palette.headingAnsi ?? ""}`;
 	}
-	parts.push(line.slice(at));
-	parts[0] = parts[0].replace(LEAD_LABEL, (_, before: string, label: string, after: string) => before + withLabelIcon(label) + after);
-	let result = "";
-	let inBold: string | undefined;
-	const reopen = () => (inBold ? `\x1b[1m${open}` : "");
-	for (let i = 0; i < parts.length; i++) {
-		const part = parts[i];
-		if (i % 2 === 1) {
-			// Pi's code color ends with a foreground reset; restore the bold color after it.
-			result += inBold ? `${part}${open}` : part;
-			continue;
+	if (ctx.inBold) return `\x1b[1m${italic}${ctx.boldOpen}`;
+	if (ctx.inQuote) return `${italic}${palette.quoteAnsi ?? ""}`;
+	return italic;
+}
+
+function restoreAfterMark(ctx: DecorateContext, palette: Palette): string {
+	if (ctx.headingDepth > 0) return palette.headingAnsi ?? "";
+	if (ctx.inBold) return ctx.boldOpen;
+	if (ctx.inQuote) return palette.quoteAnsi ?? "";
+	return "";
+}
+
+/** Find the opening `[` of an unparsed `[...](` span ending at `closeIdx` (the `]` of `](`). */
+function unparsedLinkSpanStart(line: string, closeIdx: number): number {
+	let depth = 0;
+	for (let i = closeIdx - 1; i >= 0; i--) {
+		const ch = line[i];
+		if (ch === "]") depth++;
+		else if (ch === "[") {
+			if (depth === 0) return i;
+			depth--;
 		}
-		let prose = part;
-		if (process.env.PI_EMPHASIS_PILL_ICONS !== "0") prose = prose.replace(ACTION_LABEL, (_, before: string, word: string, after: string) => `${before}${ACTION_ICONS[word.toLowerCase()]} ${word}${after}`);
-		if (palette.passed) prose = prose.replace(/[✓✔]/g, (m) => palette.passed!(m) + (inBold ? open : ""));
-		if (palette.failed) prose = prose.replace(/[✗✘]/g, (m) => palette.failed!(m) + (inBold ? open : ""));
-		if (palette.arrow) prose = prose.replace(/→/g, (m) => palette.arrow!(m) + (inBold ? open : ""));
-		if (palette.tree) prose = prose.replace(/[├└]──/g, (m) => palette.tree!(m) + (inBold ? open : ""));
-		result += prose.replace(INLINE, (match, slashes: string | undefined, marker: string | undefined, label: string | undefined) => {
-			if (label !== undefined) {
-				if (!palette.pills || !label.trim()) return match;
-				return pill(label, palette) + reopen();
-			}
-			if ((slashes ?? "").length % 2 === 1) return match; // escaped marker
-			if (!inBold) {
-				inBold = marker;
-				return `${slashes}${marker}${open}`;
-			}
-			if (inBold === marker) {
-				inBold = undefined;
-				return `${slashes}${close}${marker}`;
-			}
-			return match;
+	}
+	return 0;
+}
+
+function decorateMarksAndPills(text: string, ctx: DecorateContext, palette: Palette): string {
+	// Avoid emitting \x1b[ inside an unparsed `[...](` span, or marked pairs the CSI `[` with `](` as a fake link.
+	if (text.includes("](")) {
+		return text
+			.split(/(\r?\n)/)
+			.map((part, idx) => {
+				if (idx % 2 === 1) return part;
+				const closeIdx = part.lastIndexOf("](");
+				if (closeIdx < 0) return decorateMarksAndPills(part, ctx, palette);
+				const spanStart = unparsedLinkSpanStart(part, closeIdx);
+				const splitAt = closeIdx + 2;
+				const before = spanStart > 0 ? decorateMarksAndPills(part.slice(0, spanStart), ctx, palette) : "";
+				return before + part.slice(spanStart, splitAt) + decorateMarksAndPills(part.slice(splitAt), ctx, palette);
+			})
+			.join("");
+	}
+	const afterMark = restoreAfterMark(ctx, palette);
+	let out = text;
+	if (palette.passed) out = out.replace(/[✓✔]/g, (m) => palette.passed!(m) + afterMark);
+	if (palette.failed) out = out.replace(/[✗✘]/g, (m) => palette.failed!(m) + afterMark);
+	if (palette.arrow) out = out.replace(/→/g, (m) => palette.arrow!(m) + afterMark);
+	if (palette.tree) out = out.replace(/[├└]──/g, (m) => palette.tree!(m) + afterMark);
+	if (palette.pills) {
+		const afterPill = restoreAfterPill(ctx, palette);
+		const disableUnderline = ctx.headingDepth === 1;
+		const disableItalic = ctx.inItalic;
+		out = out.replace(PILL_RE, (match, label: string) => {
+			if (!label.trim()) return match;
+			return pill(label, palette, disableUnderline, disableItalic) + afterPill;
 		});
 	}
-	// An unclosed span (streaming or literal asterisks) ends its color at the line end.
-	if (inBold) result += close;
-	return result;
+	return out;
+}
+
+function decorateBoldLine(
+	segment: string,
+	ctx: DecorateContext,
+	palette: Palette,
+	avoidLeadingEdge: boolean,
+	avoidTrailingEdge: boolean,
+): string {
+	const match = segment.match(/^([ \t]*)([\s\S]*?)([ \t]*)$/);
+	if (!match) return segment;
+	const [, lead, body, trail] = match;
+	if (!body) return segment;
+
+	let leftKeep = lead;
+	let core = body;
+	let rightKeep = trail;
+
+	// Keep ANSI escapes away from an adjacent bare URL/email autolink so marked's GFM
+	// autolink regex does not absorb escape bytes into the URL or email address.
+	if (avoidLeadingEdge && !lead) {
+		const split = core.match(/^(\S+)([ \t]+)([\s\S]+)$/);
+		if (!split) return decorateMarksAndPills(segment, { ...ctx, inBold: false }, palette);
+		leftKeep = split[1] + split[2];
+		core = split[3];
+	}
+	if (avoidTrailingEdge && !trail) {
+		const split = core.match(/^([\s\S]*?)([^A-Za-z0-9._+-]+)$/);
+		if (!split || !split[1]) return decorateMarksAndPills(segment, { ...ctx, inBold: false }, palette);
+		core = split[1];
+		rightKeep = split[2];
+	}
+
+	return `${leftKeep}${ctx.boldOpen}${decorateMarksAndPills(core, ctx, palette)}${ctx.boldClose}${rightKeep}`;
+}
+
+function decorateTextSlice(
+	slice: string,
+	ctx: DecorateContext,
+	palette: Palette,
+	prevSibling: Token | undefined,
+	nextSibling: Token | undefined,
+): string {
+	const withIcon = ctx.pendingIcon ? `${ctx.pendingIcon} ${slice}` : slice;
+	if (!ctx.inBold) return decorateMarksAndPills(withIcon, ctx, palette);
+
+	const parts = withIcon.split(/(\r?\n)/);
+	const lastLineIdx = parts.length - 1;
+	for (let i = 0; i < parts.length; i += 2) {
+		const line = parts[i];
+		if (!line) continue;
+		if (line.includes("](")) {
+			parts[i] = decorateMarksAndPills(line, { ...ctx, inBold: false }, palette);
+			continue;
+		}
+		// On continuation lines inside a blockquote, keep the leading ">" marker outside ANSI escapes.
+		let quotePrefix = "";
+		let content = line;
+		if (i > 0 && ctx.inQuote) {
+			const qm = line.match(/^[ \t]*(?:>[ \t]?)+/);
+			if (qm) {
+				quotePrefix = qm[0];
+				content = line.slice(quotePrefix.length);
+			}
+		}
+		const avoidLeading = i === 0 && isBareAutolink(prevSibling);
+		const avoidTrailing = i === lastLineIdx && isBareAutolink(nextSibling);
+		parts[i] = quotePrefix + decorateBoldLine(content, ctx, palette, avoidLeading, avoidTrailing);
+	}
+	return parts.join("");
+}
+
+/** Apply colors and icons to assistant Markdown using marked's token tree so code and links stay intact. */
+export function decorate(markdown: string, palette: Palette): string {
+	const [boldOpen, boldClose] = palette.bold("\u0000").split("\u0000") as [string, string];
+	markdown = markdown.replace(/\t/g, "   "); // Pi turns tabs into three spaces before parsing, so parse what it parses.
+
+	const edits: Array<[number, number, string]> = [];
+
+	function walk(tokens: readonly Token[], from: number, limit: number, ctx: DecorateContext): number {
+		let pos = from;
+		for (let i = 0; i < tokens.length; i++) {
+			const token = tokens[i];
+			if (
+				token.type === "code" ||
+				token.type === "codespan" ||
+				token.type === "html" ||
+				token.type === "link" ||
+				token.type === "image" ||
+				token.type === "hr" ||
+				token.type === "def" ||
+				token.type === "checkbox" ||
+				token.type === "br" ||
+				token.type === "space"
+			) {
+				const hit = token.raw ? matchRaw(markdown, token.raw, pos, limit) : undefined;
+				if (hit) pos = hit[1];
+				continue;
+			}
+
+			if (token.type === "escape") {
+				const hit = matchRaw(markdown, token.raw, pos, limit);
+				if (hit) {
+					if (ctx.inBold) {
+						const slice = markdown.slice(hit[0], hit[1]);
+						edits.push([hit[0], hit[1], `${ctx.boldOpen}${slice}${ctx.boldClose}`]);
+					}
+					pos = hit[1];
+				}
+				continue;
+			}
+
+			if (token.type === "heading") {
+				const heading = token as Tokens.Heading;
+				const hit = matchRaw(markdown, heading.raw, pos, limit);
+				if (!hit) continue;
+				const rawSlice = markdown.slice(hit[0], hit[1]);
+				const prefix = rawSlice.match(ATX_HEADING_PREFIX)?.[0] ?? rawSlice.match(/^ {0,3}/)?.[0] ?? "";
+				const titleStart = hit[0] + prefix.length;
+				const headingTitle = heading.text.replace(TRAILING_PILLS, "").trim();
+				const icon = labelIconFor(headingTitle);
+				if (icon) edits.push([titleStart, titleStart, `${icon} `]);
+				if (heading.tokens?.length) {
+					walk(heading.tokens, titleStart, hit[1], { ...ctx, headingDepth: heading.depth, inBold: false, pendingIcon: undefined });
+				}
+				pos = hit[1];
+				continue;
+			}
+
+			if (token.type === "blockquote") {
+				const hit = matchRaw(markdown, token.raw, pos, limit);
+				if (!hit) continue;
+				if ("tokens" in token && Array.isArray(token.tokens)) {
+					walk(token.tokens, hit[0], hit[1], { ...ctx, inQuote: true, inItalic: true, pendingIcon: undefined });
+				}
+				pos = hit[1];
+				continue;
+			}
+
+			if (token.type === "list" && "items" in token) {
+				const list = token as Tokens.List;
+				const hit = matchRaw(markdown, list.raw, pos, limit);
+				const listEnd = hit ? hit[1] : limit;
+				let itemPos = hit ? hit[0] : pos;
+				for (const item of list.items) {
+					const itemHit = matchRaw(markdown, item.raw, itemPos, listEnd);
+					const start = itemHit ? itemHit[0] : itemPos;
+					const end = itemHit ? itemHit[1] : listEnd;
+					walk(item.tokens, start, end, { ...ctx, pendingIcon: undefined });
+					itemPos = itemHit ? itemHit[1] : end;
+				}
+				pos = hit ? Math.max(itemPos, hit[1]) : itemPos;
+				continue;
+			}
+
+			if (token.type === "table" && "header" in token && "rows" in token) {
+				const table = token as Tokens.Table;
+				const hit = matchRaw(markdown, table.raw, pos, limit);
+				const tableEnd = hit ? hit[1] : limit;
+				let cellPos = hit ? hit[0] : pos;
+				for (const cell of table.header) cellPos = walk(cell.tokens, cellPos, tableEnd, { ...ctx, pendingIcon: undefined });
+				for (const row of table.rows) {
+					for (const cell of row) cellPos = walk(cell.tokens, cellPos, tableEnd, { ...ctx, pendingIcon: undefined });
+				}
+				pos = hit ? Math.max(cellPos, hit[1]) : cellPos;
+				continue;
+			}
+
+			if (token.type === "strong") {
+				const strong = token as Tokens.Strong;
+				const hit = matchRaw(markdown, strong.raw, pos, limit);
+				if (!hit) continue;
+				const openMark = markdown.slice(hit[0], hit[0] + 2);
+				const closeMark = markdown.slice(hit[1] - 2, hit[1]);
+				const hasDelim = (openMark === "**" || openMark === "__") && openMark === closeMark;
+				const innerStart = hasDelim ? hit[0] + 2 : hit[0];
+				const innerEnd = hasDelim ? hit[1] - 2 : hit[1];
+
+				let icon: string | undefined;
+				const plainChildOnly = strong.tokens.length === 1 && strong.tokens[0].type === "text" && !strong.tokens[0].tokens?.length;
+				if (plainChildOnly && !strong.text.includes("\n") && strong.text.length <= 32) {
+					const lineStart = markdown.lastIndexOf("\n", hit[0] - 1) + 1;
+					const beforeOnLine = markdown.slice(lineStart, hit[0]);
+					if (LINE_LEAD_PREFIX.test(beforeOnLine)) icon = labelIconFor(strong.text);
+					if (!icon) icon = actionIconFor(strong.text);
+				}
+
+				walk(strong.tokens, innerStart, innerEnd, {
+					...ctx,
+					inBold: ctx.headingDepth === 0,
+					pendingIcon: icon,
+				});
+				pos = hit[1];
+				continue;
+			}
+
+			if (token.type === "em" || token.type === "del") {
+				const hit = matchRaw(markdown, token.raw, pos, limit);
+				if (!hit) continue;
+				const delimLen = token.type === "em" ? 1 : token.raw.startsWith("~~") ? 2 : 1;
+				if ("tokens" in token && Array.isArray(token.tokens)) {
+					walk(token.tokens, hit[0] + delimLen, hit[1] - delimLen, {
+						...ctx,
+						inItalic: ctx.inItalic || token.type === "em",
+						pendingIcon: undefined,
+					});
+				}
+				pos = hit[1];
+				continue;
+			}
+
+			if ("tokens" in token && Array.isArray(token.tokens) && token.tokens.length > 0) {
+				const hit = token.raw ? matchRaw(markdown, token.raw, pos, limit) : undefined;
+				const start = hit ? hit[0] : pos;
+				const end = hit ? hit[1] : limit;
+				const nextPos = walk(token.tokens, start, end, ctx);
+				pos = hit ? Math.max(nextPos, hit[1]) : nextPos;
+				continue;
+			}
+
+			if (token.type === "text" && token.raw) {
+				const hit = matchRaw(markdown, token.raw, pos, limit);
+				if (hit) {
+					const slice = markdown.slice(hit[0], hit[1]);
+					const next = decorateTextSlice(slice, ctx, palette, tokens[i - 1], tokens[i + 1]);
+					if (next !== slice) edits.push([hit[0], hit[1], next]);
+					pos = hit[1];
+				}
+				continue;
+			}
+
+			if (token.raw) {
+				const hit = matchRaw(markdown, token.raw, pos, limit);
+				if (hit) pos = hit[1];
+			}
+		}
+		return pos;
+	}
+
+	walk(parser.lexer(markdown), 0, markdown.length, {
+		headingDepth: 0,
+		inBold: false,
+		inItalic: false,
+		inQuote: false,
+		boldOpen,
+		boldClose,
+	});
+
+	if (edits.length === 0) return markdown;
+	let out = "";
+	let cursor = 0;
+	for (const [start, end, replacement] of edits) {
+		if (start < cursor) continue;
+		out += markdown.slice(cursor, start) + replacement;
+		cursor = end;
+	}
+	return out + markdown.slice(cursor);
 }
 
 const pills = (words: string[]) => words.map((w) => `[[${w}]]`).join(", ");
@@ -329,7 +573,7 @@ export function replyGuidance(): string {
 	return `Plain, natural human prose always takes precedence over formatting decoration. Never turn questions, blockers, or explanations into dense pill-and-label chains or cryptic shorthand. These rules shape visual presentation only in this terminal, which colors pills, adds icons, and cannot change text size. User and project instructions govern substance, plain language, and when plain text is required.
 
 - **Brief updates stay plain.** Keep routine 1–2 line progress updates in plain prose, without bold lead labels, mode pills, or action lead-ins (an optional [[In progress]] pill is fine). Still use red, yellow, or solid-red pills for real failures, blockers, asks, or risky/costly actions. Save headings and multi-part layouts for longer replies (findings, comparisons, final summaries).
-- **Status pills (sparse and purposeful).** Write \`[[Word]]\` beside its subject (optional short detail: [[Passed 12/12]], [[Failed: 3 tests]]). At most one pill per bullet or cell (except \`→\` sequences and a single count line); none in headings; never invent status words:
+- **Status pills (sparse and purposeful).** Write \`[[Word]]\` beside its subject (optional short detail: [[Passed 12/12]], [[Failed: 3 tests]]). At most one pill per bullet, heading, or cell (except \`→\` sequences and a single count line); never invent status words:
   - **Red (use for real failures or blockers):** ${pills(v.error.core)}.
   - **Yellow (use for real asks, decisions, or notable risks):** ${pills(v.warning.core)}.
   - **Solid red (use before risky or costly actions):** ${pills(v.danger.core)}.
