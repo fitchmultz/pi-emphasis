@@ -212,13 +212,14 @@ function isBareAutolink(token: Token | undefined): boolean {
 interface DecorateContext {
 	headingDepth: number;
 	inBold: boolean;
+	inItalic: boolean;
 	inQuote: boolean;
 	boldOpen: string;
 	boldClose: string;
 	pendingIcon?: string;
 }
 
-function pill(label: string, palette: Palette, disableUnderline: boolean): string {
+function pill(label: string, palette: Palette, disableUnderline: boolean, disableItalic: boolean): string {
 	const style = palette.pills![toneOf(label)];
 	// No-break spaces keep a two-word pill on one line when Pi wraps the paragraph.
 	const { icon, word } = splitLabel(label);
@@ -230,19 +231,24 @@ function pill(label: string, palette: Palette, disableUnderline: boolean): strin
 	const capBold = LOW_INDEXED_FG.test(style.cap);
 	const capL = left ? `${capBold ? "\x1b[1m" : ""}${style.cap}${left}${capBold ? "\x1b[22m" : ""}\x1b[39m` : "";
 	const capR = right ? `${capBold ? "\x1b[1m" : ""}${style.cap}${right}${capBold ? "\x1b[22m" : ""}\x1b[39m` : "";
-	// Use combined SGR 24;22 so chalk.underline() on H1 headings does not rewrite \x1b[24m back to \x1b[24m\x1b[4m.
-	const prefix = disableUnderline ? "\x1b[24;22m" : "";
+	// Use combined SGR (e.g. 24;22 or 23;22) so chalk.underline()/chalk.italic() do not rewrite
+	// standalone \x1b[24m or \x1b[23m back on across pill caps and labels.
+	const resets: string[] = [];
+	if (disableUnderline) resets.push("24");
+	if (disableItalic) resets.push("23");
+	const prefix = resets.length > 0 ? `\x1b[${resets.join(";")};22m` : "";
 	return `${prefix}${capL}${style.label}\x1b[1m${pad}${text}${pad}\x1b[22;27m\x1b[39m\x1b[49m${capR}`;
 }
 
 function restoreAfterPill(ctx: DecorateContext, palette: Palette): string {
+	const italic = ctx.inItalic ? "\x1b[3m" : "";
 	if (ctx.headingDepth > 0) {
 		const underline = ctx.headingDepth === 1 ? "\x1b[4m" : "";
-		return `\x1b[1m${underline}${palette.headingAnsi ?? ""}`;
+		return `\x1b[1m${underline}${italic}${palette.headingAnsi ?? ""}`;
 	}
-	if (ctx.inBold) return `\x1b[1m${ctx.boldOpen}`;
-	if (ctx.inQuote) return palette.quoteAnsi ?? "";
-	return "";
+	if (ctx.inBold) return `\x1b[1m${italic}${ctx.boldOpen}`;
+	if (ctx.inQuote) return `${italic}${palette.quoteAnsi ?? ""}`;
+	return italic;
 }
 
 function restoreAfterMark(ctx: DecorateContext, palette: Palette): string {
@@ -252,8 +258,22 @@ function restoreAfterMark(ctx: DecorateContext, palette: Palette): string {
 	return "";
 }
 
+/** Find the opening `[` of an unparsed `[...](` span ending at `closeIdx` (the `]` of `](`). */
+function unparsedLinkSpanStart(line: string, closeIdx: number): number {
+	let depth = 0;
+	for (let i = closeIdx - 1; i >= 0; i--) {
+		const ch = line[i];
+		if (ch === "]") depth++;
+		else if (ch === "[") {
+			if (depth === 0) return i;
+			depth--;
+		}
+	}
+	return 0;
+}
+
 function decorateMarksAndPills(text: string, ctx: DecorateContext, palette: Palette): string {
-	// Avoid emitting \x1b[ before an unparsed "](" on the same line, or marked pairs the CSI "[" with "](" as a fake link.
+	// Avoid emitting \x1b[ inside an unparsed `[...](` span, or marked pairs the CSI `[` with `](` as a fake link.
 	if (text.includes("](")) {
 		return text
 			.split(/(\r?\n)/)
@@ -261,8 +281,10 @@ function decorateMarksAndPills(text: string, ctx: DecorateContext, palette: Pale
 				if (idx % 2 === 1) return part;
 				const closeIdx = part.lastIndexOf("](");
 				if (closeIdx < 0) return decorateMarksAndPills(part, ctx, palette);
+				const spanStart = unparsedLinkSpanStart(part, closeIdx);
 				const splitAt = closeIdx + 2;
-				return part.slice(0, splitAt) + decorateMarksAndPills(part.slice(splitAt), ctx, palette);
+				const before = spanStart > 0 ? decorateMarksAndPills(part.slice(0, spanStart), ctx, palette) : "";
+				return before + part.slice(spanStart, splitAt) + decorateMarksAndPills(part.slice(splitAt), ctx, palette);
 			})
 			.join("");
 	}
@@ -275,9 +297,10 @@ function decorateMarksAndPills(text: string, ctx: DecorateContext, palette: Pale
 	if (palette.pills) {
 		const afterPill = restoreAfterPill(ctx, palette);
 		const disableUnderline = ctx.headingDepth === 1;
+		const disableItalic = ctx.inItalic;
 		out = out.replace(PILL_RE, (match, label: string) => {
 			if (!label.trim()) return match;
-			return pill(label, palette, disableUnderline) + afterPill;
+			return pill(label, palette, disableUnderline, disableItalic) + afterPill;
 		});
 	}
 	return out;
@@ -414,7 +437,7 @@ export function decorate(markdown: string, palette: Palette): string {
 				const hit = matchRaw(markdown, token.raw, pos, limit);
 				if (!hit) continue;
 				if ("tokens" in token && Array.isArray(token.tokens)) {
-					walk(token.tokens, hit[0], hit[1], { ...ctx, inQuote: true, pendingIcon: undefined });
+					walk(token.tokens, hit[0], hit[1], { ...ctx, inQuote: true, inItalic: true, pendingIcon: undefined });
 				}
 				pos = hit[1];
 				continue;
@@ -482,7 +505,11 @@ export function decorate(markdown: string, palette: Palette): string {
 				if (!hit) continue;
 				const delimLen = token.type === "em" ? 1 : token.raw.startsWith("~~") ? 2 : 1;
 				if ("tokens" in token && Array.isArray(token.tokens)) {
-					walk(token.tokens, hit[0] + delimLen, hit[1] - delimLen, { ...ctx, pendingIcon: undefined });
+					walk(token.tokens, hit[0] + delimLen, hit[1] - delimLen, {
+						...ctx,
+						inItalic: ctx.inItalic || token.type === "em",
+						pendingIcon: undefined,
+					});
 				}
 				pos = hit[1];
 				continue;
@@ -519,6 +546,7 @@ export function decorate(markdown: string, palette: Palette): string {
 	walk(parser.lexer(markdown), 0, markdown.length, {
 		headingDepth: 0,
 		inBold: false,
+		inItalic: false,
 		inQuote: false,
 		boldOpen,
 		boldClose,

@@ -127,7 +127,8 @@ describe("headings, links, blockquotes, and multiline bold", () => {
 
 	test("blockquotes restore quote color after pills and marks", () => {
 		const raw = decorate("> [[Blocked]] in quote → next", palette);
-		assert.ok(raw.includes("\x1b[38;fg-mdQuotem in quote"));
+		assert.ok(raw.includes("\x1b[23;22m"), "blockquote pill should suspend italic so caps and label stay upright");
+		assert.ok(raw.includes("\x1b[3m\x1b[38;fg-mdQuotem in quote"), "blockquote text after pill should restore italic and quote color");
 		assert.ok(raw.includes("<accent>→</>\x1b[38;fg-mdQuotem next"));
 	});
 
@@ -167,6 +168,14 @@ describe("headings, links, blockquotes, and multiline bold", () => {
 		assert.equal(
 			plain("Status [[Done]]\nand [text [[Done]]](https://example.com) and [[Fixed]]"),
 			"Status |\uf00c Done|\nand [text [[Done]]](https://example.com) and |\uf0ad Fixed|",
+		);
+		assert.equal(
+			plain("Status [[Done]] and [text [[X]]](https://example.com) and [[Fixed]]"),
+			"Status |\uf00c Done| and [text [[X]]](https://example.com) and |\uf0ad Fixed|",
+		);
+		assert.equal(
+			plain("[[Done]] [a [[X]]](https://example.com) [[Fixed]] [b [[Y]]](https://example.com) [[Live]]"),
+			"|\uf00c Done| [a [[X]]](https://example.com) |\uf0ad Fixed| [b [[Y]]](https://example.com) |\uf135 Live|",
 		);
 	});
 });
@@ -231,7 +240,7 @@ describe("solid pills and real Pi Markdown rendering", () => {
 			hr: (t) => t,
 			listBullet: (t) => t,
 			bold: (t) => `\x1b[1m${t}\x1b[22m`,
-			italic: (t) => `\x1b[3m${t}\x1b[23m`,
+			italic: (t) => `\x1b[3m${t.replaceAll("\x1b[23m", "\x1b[23m\x1b[3m")}\x1b[23m`,
 			strikethrough: (t) => `\x1b[9m${t}\x1b[29m`,
 			underline: (t) => `\x1b[4m${t.replaceAll("\x1b[24m", "\x1b[24m\x1b[4m")}\x1b[24m`,
 		};
@@ -243,6 +252,8 @@ describe("solid pills and real Pi Markdown rendering", () => {
 			"# Release [[Live]] today",
 			"Use **mitchfultz@gmail.com** and **https://example.com** and [**bold link**](https://example.com/__foo__).",
 			"Broken bracket link [text [[Done]]](https://example.com) and [[Costs money]] [[Verify]] [[Owned]].",
+			"Same-line [[Done]] and [text [[X]]](https://example.com) and [[Fixed]].",
+			"> [[Blocked]] inside an italic blockquote.",
 		].join("\n\n");
 
 		const rendered = new Markdown(decorate(sample, realPalette), 0, 0, mdTheme).render(120).join("\n");
@@ -255,6 +266,8 @@ describe("solid pills and real Pi Markdown rendering", () => {
 		assert.ok(rendered.includes("\x1b[4mmitchfultz@gmail.com\x1b[24m"), "email autolink should parse cleanly without ANSI corruption");
 		assert.ok(rendered.includes("https://example.com/__foo__"), "explicit link URL with underscores should remain intact");
 		assert.ok(!rendered.includes("\x1b[24m\x1b[4m"), "H1 pill should not have underline re-enabled across caps");
+		assert.ok(!rendered.includes("\x1b[23m\x1b[3m"), "blockquote pill should not have italic re-enabled across caps");
+		assert.ok(visible.includes("Same-line \ue0b6\uf00c\u00a0Done\ue0b4 and [text [[X]]](https://example.com) and \ue0b6\uf0ad\u00a0Fixed\ue0b4."), "same-line pills before and after unparsed bracket link should both render");
 	});
 });
 
