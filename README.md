@@ -14,7 +14,7 @@ It changes only what is drawn. Stored messages, copied text and HTML exports kee
 
 | You need | Why | Without it |
 |---|---|---|
-| [Pi](https://github.com/earendil-works/pi) 1.6.1 or newer | This is a Pi extension | Older Pi versions are outside the supported range |
+| [Pi](https://github.com/earendil-works/pi) 1.7.0 or newer | This is a Pi extension | Older Pi versions are outside the supported range |
 | A terminal that can draw [Nerd Font](https://www.nerdfonts.com/) symbols | The icons and the rounded pill ends are Nerd Font symbols | You see empty boxes or question marks. See [Set up your terminal](#set-up-your-terminal) |
 | A terminal with color | Pills are colored backgrounds | Pills are drawn in reverse video, all in one color |
 | `git` | `pi install` clones this repository | The install fails |
